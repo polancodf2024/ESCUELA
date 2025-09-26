@@ -282,35 +282,36 @@ def guardar_documentos(datos_inscripcion, archivos_subidos):
         # Obtener ruta de la carpeta
         ruta_carpeta = obtener_ruta_carpeta(datos_inscripcion['programa'])
         crear_carpeta_si_no_existe(ruta_carpeta)
-        
+
         # Generar nombre base para los archivos
         nombre_base = generar_nombre_archivo_base(datos_inscripcion)
-        
+
         documentos_guardados = []
-        
-        for i, archivo in enumerate(archivos_subidos):
+
+        for i, archivo_info in enumerate(archivos_subidos):
             # Obtener abreviatura del documento
-            abreviatura_doc = obtener_abreviatura_documento(archivo['nombre'])
-            
+            abreviatura_doc = obtener_abreviatura_documento(archivo_info['nombre'])
+
             # Generar nombre del archivo con abreviatura
             nombre_archivo = f"{nombre_base}.{abreviatura_doc}.pdf"
             ruta_completa = os.path.join(ruta_carpeta, nombre_archivo)
-            
+
             # Guardar el archivo
             with open(ruta_completa, "wb") as f:
-                f.write(archivo['archivo'].getvalue())
-            
+                f.write(archivo_info['archivo'].getvalue())
+
             documentos_guardados.append({
-                'nombre_original': archivo['nombre'],
+                'nombre_original': archivo_info['nombre'],
                 'nombre_guardado': nombre_archivo,
                 'ruta': ruta_completa,
-                'tamaño': archivo['tamaño'],
+                'tamaño': archivo_info['tamaño'],
                 'abreviatura': abreviatura_doc
             })
-        
+
         return True, documentos_guardados
     except Exception as e:
         return False, str(e)
+
 
 def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
     """Guarda el progreso en un archivo CSV en la carpeta correspondiente"""
@@ -318,16 +319,16 @@ def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
         # Obtener ruta de la carpeta
         ruta_carpeta = obtener_ruta_carpeta(datos_inscripcion['programa'])
         crear_carpeta_si_no_existe(ruta_carpeta)
-        
+
         # Generar nombre del archivo CSV
         nombre_base = generar_nombre_archivo_base(datos_inscripcion)
         nombre_archivo_csv = f"{nombre_base}.registro.csv"
         ruta_completa_csv = os.path.join(ruta_carpeta, nombre_archivo_csv)
-        
+
         # Preparar datos para CSV
         abreviatura_programa = obtener_abreviatura_programa(datos_inscripcion['programa'])
         categoria_remota = obtener_categoria_directorio(abreviatura_programa)
-        
+
         datos_csv = {
             'matricula': datos_inscripcion['matricula'],
             'programa': datos_inscripcion['programa'],
@@ -347,7 +348,7 @@ def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
             'carpeta_destino': ruta_carpeta,
             'carpeta_remota': categoria_remota
         }
-        
+
         # Guardar en CSV
         with open(ruta_completa_csv, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
@@ -355,10 +356,11 @@ def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
             writer.writerow(datos_csv.keys())
             # Escribir datos
             writer.writerow(datos_csv.values())
-        
+
         return True, ruta_completa_csv, documentos_guardados
     except Exception as e:
         return False, str(e), []
+
 
 # Nuevas funciones para email y transferencia remota (modificadas para nueva estructura de directorios)
 def enviar_notificacion_email(datos_inscripcion, documentos_guardados, es_completado=False):
@@ -543,18 +545,18 @@ def guardar_progreso_completo(datos_inscripcion, archivos_subidos, es_envio_comp
             return False, f"Error al guardar documentos: {resultado_docs}"
     else:
         resultado_docs = []
-    
+
     # Guardar registro CSV
     datos_inscripcion['completado'] = es_envio_completo
     exito_csv, ruta_csv, docs_guardados = guardar_progreso_csv(datos_inscripcion, resultado_docs)
-    
+
     if not exito_csv:
         return False, f"Error al guardar registro: {ruta_csv}"
-    
+
     # Sincronizar con servidor remoto si es envío completo
     if es_envio_completo:
         sincronizar_con_servidor(datos_inscripcion, docs_guardados, ruta_csv)
-    
+
     return True, {
         'ruta_csv': ruta_csv,
         'documentos_guardados': docs_guardados,
@@ -575,50 +577,51 @@ def mostrar_sidebar():
     with st.sidebar:
         try:
             logo = Image.open('escudo_COLOR.jpg')
-            st.image(logo, width='stretch')  # ← LINEA CORREGIDA
+            # CORRECCIÓN: Usar use_container_width=True (compatible con tu versión)
+            st.image(logo, use_container_width=True)
         except FileNotFoundError:
             st.warning("Logo no encontrado")
-        
+
         st.markdown('<div class="sidebar-header"><h3>Menú Principal</h3></div>', unsafe_allow_html=True)
-        
+
         if st.button("🏫 Oferta Educativa"):
             st.session_state.seccion_actual = "Oferta Educativa"
             st.rerun()
-        
+
         if st.button("📝 Inscripción"):
             st.session_state.seccion_actual = "Inscripción"
             st.rerun()
-        
+
         if st.button("📄 Documentación"):
             st.session_state.seccion_actual = "Documentación"
             st.rerun()
-        
+
         if st.button("💳 Pagos"):
             st.session_state.seccion_actual = "Pagos"
             st.rerun()
-        
+
         if st.button("📱 Contacto"):
             st.session_state.seccion_actual = "Contacto"
             st.rerun()
-        
+
         # Mostrar tabla de abreviaturas en el sidebar
         if st.button("🔤 Abreviaturas"):
             st.session_state.mostrar_abreviaturas = not st.session_state.get('mostrar_abreviaturas', False)
             st.rerun()
-        
+
         if st.session_state.get('mostrar_abreviaturas', False):
             st.markdown("---")
             st.markdown("### 📋 Tabla de Abreviaturas")
-            
+
             with st.expander("Programas Académicos"):
                 for programa, abreviatura in ABREVIATURAS_PROGRAMAS.items():
                     categoria = obtener_categoria_directorio(abreviatura)
                     st.write(f"**{abreviatura}** ({categoria}): {programa}")
-            
+
             with st.expander("Tipos de Documentos"):
                 for documento, abreviatura in ABREVIATURAS_DOCUMENTOS.items():
                     st.write(f"**{abreviatura}**: {documento}")
-            
+
             with st.expander("Estructura de Directorios Remotos"):
                 st.write("**ESP-CARD, ESP-NEFR, ESP-GEST, ESP-PERF** → ESPECIALIDADES/")
                 st.write("**LIC-ENF** → LICENCIATURAS/")
@@ -635,9 +638,7 @@ def mostrar_oferta_educativa():
     # Mostrar información de nueva estructura de directorios
     config = obtener_configuracion()
     remote_base = config.get('remote_dir', '')
- #   st.info(f"📁 **Nueva estructura remota activa:** Los archivos se organizarán automáticamente en `{remote_base}/[CATEGORIA]/`")
- #   st.info(f"🔤 **Ejemplo:** `MAT-ABC123.ESP-CARD.25-09-25.18-12.Carlos_Polanco.CEDULA.pdf` → `{remote_base}/ESPECIALIDADES/`")
-
+    
     tab1, tab2, tab3, tab4 = st.tabs(["Especialidades UNAM", "Especialidad SEP", "Licenciatura UNAM", "Educación Continua"])
 
     with tab1:
@@ -1522,4 +1523,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
