@@ -13,7 +13,6 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import paramiko
-from scp import SCPClient
 
 # Configuración inicial
 def configurar_pagina():
@@ -128,6 +127,67 @@ def cargar_estilos():
     </style>
     """, unsafe_allow_html=True)
 
+# Tabla de abreviaturas para cada programa
+ABREVIATURAS_PROGRAMAS = {
+    # ESPECIALIDADES UNAM
+    "Especialidad en Enfermería Cardiovascular": "ESP-CARD",
+    "Especialidad en Enfermería Nefrológica": "ESP-NEFR",
+    "Especialidad en Gestión del Cuidado": "ESP-GEST",
+    
+    # ESPECIALIDAD SEP
+    "Especialidad de Enfermería en Circulación Extracorpórea y Perfusión": "ESP-PERF",
+    
+    # LICENCIATURA UNAM
+    "Licenciatura en Enfermería": "LIC-ENF",
+    
+    # DIPLOMADOS
+    "Diplomado de Cardiología Básica para Profesionales de Enfermería": "DIP-CBAS",
+    "Diplomado de Cardiología Pediátrica para Profesionales de Enfermería": "DIP-CPED",
+    "Diplomado de Oxigenación por Membrana Extracorpórea": "DIP-ECMO",
+    "Diplomado de Enseñanza en Simulación Clínica": "DIP-SIMU",
+    "Diplomado de Hemodinámica": "DIP-HEMO",
+    "Diplomado de Nefro-Intervencionismo": "DIP-NINT"
+}
+
+# Tabla de abreviaturas para tipos de documentos
+ABREVIATURAS_DOCUMENTOS = {
+    # Documentos generales
+    "Acta de nacimiento": "ACTNAC",
+    "Certificado de bachillerato": "BACH",
+    "CURP": "CURP",
+    "Comprobante de domicilio": "DOM",
+    "Identificación oficial": "INE",
+    
+    # Documentos profesionales
+    "Título profesional": "TITULO",
+    "Cédula profesional": "CEDULA",
+    "CV actualizado": "CV",
+    "Carta de motivos": "MOTIVOS",
+    "Carta de exposición de motivos": "EXPMOT",
+    
+    # Documentos específicos
+    "Certificado médico de buena salud": "MEDICO",
+    "Fotografías tamaño infantil": "FOTOS",
+    "Cartas de recomendación": "RECOM",
+    "Comprobante de estudios": "ESTUDIOS",
+    "Comprobante de estudios de enfermería": "ESTENF"
+}
+
+# Mapeo de categorías de programas para directorios remotos
+CATEGORIAS_PROGRAMAS = {
+    "ESP-CARD": "ESPECIALIDADES",
+    "ESP-NEFR": "ESPECIALIDADES", 
+    "ESP-GEST": "ESPECIALIDADES",
+    "ESP-PERF": "ESPECIALIDADES",
+    "LIC-ENF": "LICENCIATURAS",
+    "DIP-CBAS": "DIPLOMADOS",
+    "DIP-CPED": "DIPLOMADOS",
+    "DIP-ECMO": "DIPLOMADOS",
+    "DIP-SIMU": "DIPLOMADOS",
+    "DIP-HEMO": "DIPLOMADOS",
+    "DIP-NINT": "DIPLOMADOS"
+}
+
 # Funciones auxiliares mejoradas
 def obtener_configuracion():
     """Obtiene la configuración desde secrets.toml"""
@@ -156,6 +216,36 @@ def generar_matricula():
 def validar_email(email):
     return '@' in email and '.' in email.split('@')[-1]
 
+def obtener_abreviatura_programa(programa):
+    """Obtiene la abreviatura para un programa dado"""
+    return ABREVIATURAS_PROGRAMAS.get(programa, "OTRO")
+
+def obtener_categoria_directorio(abreviatura_programa):
+    """Obtiene la categoría del directorio para una abreviatura de programa"""
+    return CATEGORIAS_PROGRAMAS.get(abreviatura_programa, "OTROS")
+
+def obtener_ruta_remota_completa(abreviatura_programa, nombre_archivo):
+    """Obtiene la ruta completa remota para un archivo"""
+    config = obtener_configuracion()
+    remote_base = config.get('remote_dir', '')
+    categoria = obtener_categoria_directorio(abreviatura_programa)
+    
+    # Construir la ruta remota: remote_dir/CATEGORIA/nombre_archivo
+    return f"{remote_base}/{categoria}/{nombre_archivo}"
+
+def obtener_abreviatura_documento(nombre_documento):
+    """Obtiene la abreviatura para un tipo de documento"""
+    # Buscar coincidencias en las claves del diccionario
+    for clave, abreviatura in ABREVIATURAS_DOCUMENTOS.items():
+        if clave.lower() in nombre_documento.lower():
+            return abreviatura
+    # Si no encuentra coincidencia, generar una abreviatura basada en el nombre
+    palabras = nombre_documento.split()
+    if len(palabras) >= 2:
+        return palabras[0][:3].upper() + palabras[1][:3].upper()
+    else:
+        return nombre_documento[:6].upper().replace(' ', '')
+
 def obtener_ruta_carpeta(programa):
     """Devuelve la ruta de la carpeta correspondiente al programa seleccionado"""
     mapping_carpetas = {
@@ -183,7 +273,8 @@ def generar_nombre_archivo_base(datos_inscripcion):
     """Genera el nombre base para todos los archivos del aspirante"""
     nombre_usuario = datos_inscripcion['nombre_completo'].replace(' ', '_').replace('/', '_').replace('\\', '_')
     fecha_actual = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
-    return f"{datos_inscripcion['matricula']}.{fecha_actual}.{nombre_usuario}"
+    abreviatura_programa = obtener_abreviatura_programa(datos_inscripcion['programa'])
+    return f"{datos_inscripcion['matricula']}.{abreviatura_programa}.{fecha_actual}.{nombre_usuario}"
 
 def guardar_documentos(datos_inscripcion, archivos_subidos):
     """Guarda los documentos en la carpeta correspondiente con nombres estandarizados"""
@@ -198,12 +289,11 @@ def guardar_documentos(datos_inscripcion, archivos_subidos):
         documentos_guardados = []
         
         for i, archivo in enumerate(archivos_subidos):
-            # Crear nombre descriptivo para el documento
-            tipo_documento = archivo['nombre'].lower().replace('(', '').replace(')', '').replace('pdf', '').strip()
-            tipo_documento = tipo_documento.replace(' ', '_').replace('/', '_').replace('.', '')
+            # Obtener abreviatura del documento
+            abreviatura_doc = obtener_abreviatura_documento(archivo['nombre'])
             
-            # Generar nombre del archivo
-            nombre_archivo = f"{nombre_base}.{tipo_documento}.pdf"
+            # Generar nombre del archivo con abreviatura
+            nombre_archivo = f"{nombre_base}.{abreviatura_doc}.pdf"
             ruta_completa = os.path.join(ruta_carpeta, nombre_archivo)
             
             # Guardar el archivo
@@ -214,7 +304,8 @@ def guardar_documentos(datos_inscripcion, archivos_subidos):
                 'nombre_original': archivo['nombre'],
                 'nombre_guardado': nombre_archivo,
                 'ruta': ruta_completa,
-                'tamaño': archivo['tamaño']
+                'tamaño': archivo['tamaño'],
+                'abreviatura': abreviatura_doc
             })
         
         return True, documentos_guardados
@@ -234,9 +325,14 @@ def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
         ruta_completa_csv = os.path.join(ruta_carpeta, nombre_archivo_csv)
         
         # Preparar datos para CSV
+        abreviatura_programa = obtener_abreviatura_programa(datos_inscripcion['programa'])
+        categoria_remota = obtener_categoria_directorio(abreviatura_programa)
+        
         datos_csv = {
             'matricula': datos_inscripcion['matricula'],
             'programa': datos_inscripcion['programa'],
+            'abreviatura_programa': abreviatura_programa,
+            'categoria_remota': categoria_remota,
             'nombre_completo': datos_inscripcion['nombre_completo'],
             'fecha_nacimiento': datos_inscripcion['fecha_nacimiento'].strftime("%Y-%m-%d") if datos_inscripcion['fecha_nacimiento'] else '',
             'genero': datos_inscripcion['genero'],
@@ -245,9 +341,11 @@ def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
             'fecha_inscripcion': datos_inscripcion.get('fecha_inscripcion', ''),
             'documentos_subidos': len(documentos_guardados),
             'nombres_documentos': '; '.join([doc['nombre_guardado'] for doc in documentos_guardados]),
+            'abreviaturas_documentos': '; '.join([doc['abreviatura'] for doc in documentos_guardados]),
             'estado': 'PROGRESO' if not datos_inscripcion.get('completado', False) else 'COMPLETADO',
             'fecha_guardado': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'carpeta_destino': ruta_carpeta
+            'carpeta_destino': ruta_carpeta,
+            'carpeta_remota': categoria_remota
         }
         
         # Guardar en CSV
@@ -262,7 +360,7 @@ def guardar_progreso_csv(datos_inscripcion, documentos_guardados):
     except Exception as e:
         return False, str(e), []
 
-# Nuevas funciones para email y transferencia remota
+# Nuevas funciones para email y transferencia remota (modificadas para nueva estructura de directorios)
 def enviar_notificacion_email(datos_inscripcion, documentos_guardados, es_completado=False):
     """Envía notificación por email cuando se completa una inscripción"""
     try:
@@ -282,6 +380,9 @@ def enviar_notificacion_email(datos_inscripcion, documentos_guardados, es_comple
         msg['From'] = config['email_user']
         msg['To'] = config['notification_email']
         
+        abreviatura_programa = obtener_abreviatura_programa(datos_inscripcion['programa'])
+        categoria_remota = obtener_categoria_directorio(abreviatura_programa)
+        
         if es_completado:
             msg['Subject'] = f"✅ INSCRIPCIÓN COMPLETADA - {datos_inscripcion['matricula']}"
             cuerpo = f"""
@@ -289,13 +390,17 @@ def enviar_notificacion_email(datos_inscripcion, documentos_guardados, es_comple
             
             Matrícula: {datos_inscripcion['matricula']}
             Programa: {datos_inscripcion['programa']}
+            Abreviatura: {abreviatura_programa}
+            Categoría remota: {categoria_remota}
             Nombre: {datos_inscripcion['nombre_completo']}
             Email: {datos_inscripcion['email']}
             Teléfono: {datos_inscripcion['telefono']}
             Fecha: {datos_inscripcion.get('fecha_inscripcion', '')}
             
             Documentos subidos: {len(documentos_guardados)}
-            Carpeta destino: {obtener_ruta_carpeta(datos_inscripcion['programa'])}
+            Abreviaturas: {', '.join([doc['abreviatura'] for doc in documentos_guardados])}
+            Carpeta local: {obtener_ruta_carpeta(datos_inscripcion['programa'])}
+            Carpeta remota: {config.get('remote_dir', '')}/{categoria_remota}/
             
             ---
             Sistema de Inscripciones - Escuela de Enfermería
@@ -307,6 +412,8 @@ def enviar_notificacion_email(datos_inscripcion, documentos_guardados, es_comple
             
             Matrícula: {datos_inscripcion['matricula']}
             Programa: {datos_inscripcion['programa']}
+            Abreviatura: {abreviatura_programa}
+            Categoría: {categoria_remota}
             Nombre: {datos_inscripcion['nombre_completo']}
             Documentos subidos: {len(documentos_guardados)}
             Estado: PROGRESO
@@ -326,14 +433,19 @@ def enviar_notificacion_email(datos_inscripcion, documentos_guardados, es_comple
         st.error(f"❌ Error al enviar notificación: {e}")
         return False
 
-def transferir_archivos_remotos(ruta_local):
-    """Transfiere archivos al servidor remoto via SFTP/SCP"""
+def transferir_archivos_remotos(ruta_local, abreviatura_programa):
+    """Transfiere archivos al servidor remoto via SFTP con nueva estructura de directorios"""
     try:
         config = obtener_configuracion()
         
         if not all([config.get('remote_host'), config.get('remote_user'), config.get('remote_password')]):
             st.warning("⚠️ Configuración remota no disponible")
             return False
+        
+        # Obtener categoría y ruta remota
+        categoria = obtener_categoria_directorio(abreviatura_programa)
+        remote_base = config.get('remote_dir', '')
+        remote_dir_categoria = f"{remote_base}/{categoria}"
         
         # Crear conexión SSH
         ssh = paramiko.SSHClient()
@@ -346,26 +458,47 @@ def transferir_archivos_remotos(ruta_local):
             port=config['remote_port']
         )
         
-        # Transferir archivos via SCP
-        with SCPClient(ssh.get_transport()) as scp:
+        # Crear cliente SFTP
+        sftp = ssh.open_sftp()
+        
+        try:
+            # Crear directorio base remoto si no existe
+            try:
+                sftp.stat(remote_base)
+            except FileNotFoundError:
+                sftp.mkdir(remote_base)
+            
+            # Crear directorio de categoría remoto si no existe
+            try:
+                sftp.stat(remote_dir_categoria)
+            except FileNotFoundError:
+                sftp.mkdir(remote_dir_categoria)
+            
             if os.path.isfile(ruta_local):
                 # Es un archivo individual
-                scp.put(ruta_local, remote_path=config['remote_dir'])
+                nombre_archivo = os.path.basename(ruta_local)
+                ruta_remota = f"{remote_dir_categoria}/{nombre_archivo}"
+                sftp.put(ruta_local, ruta_remota)
+                st.success(f"✅ Archivo transferido: {nombre_archivo} → {categoria}/")
             elif os.path.isdir(ruta_local):
-                # Es una carpeta completa
-                for root, dirs, files in os.walk(ruta_local):
-                    for file in files:
-                        ruta_completa = os.path.join(root, file)
-                        scp.put(ruta_completa, remote_path=config['remote_dir'])
-        
-        ssh.close()
-        return True
+                # Es una carpeta completa (no debería ocurrir con la nueva estructura)
+                st.warning("⚠️ Transferencia de carpetas completas no soportada en nueva estructura")
+            
+            sftp.close()
+            ssh.close()
+            return True
+            
+        except Exception as e:
+            sftp.close()
+            ssh.close()
+            raise e
+            
     except Exception as e:
         st.error(f"❌ Error en transferencia remota: {e}")
         return False
 
 def sincronizar_con_servidor(datos_inscripcion, documentos_guardados, ruta_csv):
-    """Sincroniza todos los archivos con el servidor remoto"""
+    """Sincroniza todos los archivos con el servidor remoto usando nueva estructura"""
     try:
         config = obtener_configuracion()
         
@@ -375,13 +508,18 @@ def sincronizar_con_servidor(datos_inscripcion, documentos_guardados, ruta_csv):
         
         st.info("🔄 Sincronizando con servidor remoto...")
         
+        abreviatura_programa = obtener_abreviatura_programa(datos_inscripcion['programa'])
+        categoria = obtener_categoria_directorio(abreviatura_programa)
+        
+        st.info(f"📁 **Estructura remota:** `{config.get('remote_dir', '')}/{categoria}/`")
+        
         # Transferir archivo CSV
-        if not transferir_archivos_remotos(ruta_csv):
+        if not transferir_archivos_remotos(ruta_csv, abreviatura_programa):
             return False
         
         # Transferir documentos PDF
         for documento in documentos_guardados:
-            if not transferir_archivos_remotos(documento['ruta']):
+            if not transferir_archivos_remotos(documento['ruta'], abreviatura_programa):
                 return False
         
         # Enviar notificación por email
@@ -462,7 +600,29 @@ def mostrar_sidebar():
         if st.button("📱 Contacto"):
             st.session_state.seccion_actual = "Contacto"
             st.rerun()
-
+        
+        # Mostrar tabla de abreviaturas en el sidebar
+        if st.button("🔤 Abreviaturas"):
+            st.session_state.mostrar_abreviaturas = not st.session_state.get('mostrar_abreviaturas', False)
+            st.rerun()
+        
+        if st.session_state.get('mostrar_abreviaturas', False):
+            st.markdown("---")
+            st.markdown("### 📋 Tabla de Abreviaturas")
+            
+            with st.expander("Programas Académicos"):
+                for programa, abreviatura in ABREVIATURAS_PROGRAMAS.items():
+                    categoria = obtener_categoria_directorio(abreviatura)
+                    st.write(f"**{abreviatura}** ({categoria}): {programa}")
+            
+            with st.expander("Tipos de Documentos"):
+                for documento, abreviatura in ABREVIATURAS_DOCUMENTOS.items():
+                    st.write(f"**{abreviatura}**: {documento}")
+            
+            with st.expander("Estructura de Directorios Remotos"):
+                st.write("**ESP-CARD, ESP-NEFR, ESP-GEST, ESP-PERF** → ESPECIALIDADES/")
+                st.write("**LIC-ENF** → LICENCIATURAS/")
+                st.write("**DIP-CBAS, DIP-CPED, DIP-ECMO, DIP-SIMU, DIP-HEMO, DIP-NINT** → DIPLOMADOS/")
 
 def mostrar_oferta_educativa():
     st.markdown("""
@@ -472,28 +632,39 @@ def mostrar_oferta_educativa():
     </div>
     """, unsafe_allow_html=True)
 
+    # Mostrar información de nueva estructura de directorios
+    config = obtener_configuracion()
+    remote_base = config.get('remote_dir', '')
+ #   st.info(f"📁 **Nueva estructura remota activa:** Los archivos se organizarán automáticamente en `{remote_base}/[CATEGORIA]/`")
+ #   st.info(f"🔤 **Ejemplo:** `MAT-ABC123.ESP-CARD.25-09-25.18-12.Carlos_Polanco.CEDULA.pdf` → `{remote_base}/ESPECIALIDADES/`")
+
     tab1, tab2, tab3, tab4 = st.tabs(["Especialidades UNAM", "Especialidad SEP", "Licenciatura UNAM", "Educación Continua"])
 
     with tab1:
         st.markdown("""
         <div style="background-color: #e8f5e8; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
             <h4>🟢 Especialidades con Aval de la UNAM</h4>
-            <p>Programas de posgrado con reconocimiento universitario</p>
+            <p>Programas de posgrado con reconocimiento universitario → <strong>Directorio remoto: ESPECIALIDADES/</strong></p>
         </div>
         """, unsafe_allow_html=True)
 
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown("""
+            abreviatura = ABREVIATURAS_PROGRAMAS["Especialidad en Enfermería Cardiovascular"]
+            categoria = obtener_categoria_directorio(abreviatura)
+            st.markdown(f"""
             <div class="programa-card">
                 <h3>Especialidad en Enfermería Cardiovascular</h3>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                     <span class="badge badge-primary">2 años</span>
                     <span class="badge badge-secondary">Presencial</span>
                     <span class="badge badge-success">Aval UNAM</span>
+                    <span class="badge badge-info">{abreviatura}</span>
+                    <span class="badge badge-warning">{categoria}</span>
                 </div>
                 <p>Formación especializada en el cuidado de pacientes con patologías cardiovasculares en unidades de terapia intensiva y áreas críticas.</p>
+                <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
             </div>
             """, unsafe_allow_html=True)
             if st.button("Inscribirme", key="insc_esp_cardiovascular"):
@@ -502,15 +673,20 @@ def mostrar_oferta_educativa():
                 st.rerun()
 
         with col2:
-            st.markdown("""
+            abreviatura = ABREVIATURAS_PROGRAMAS["Especialidad en Enfermería Nefrológica"]
+            categoria = obtener_categoria_directorio(abreviatura)
+            st.markdown(f"""
             <div class="programa-card">
                 <h3>Especialidad en Enfermería Nefrológica</h3>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                     <span class="badge badge-primary">2 años</span>
                     <span class="badge badge-secondary">Presencial</span>
                     <span class="badge badge-success">Aval UNAM</span>
+                    <span class="badge badge-info">{abreviatura}</span>
+                    <span class="badge badge-warning">{categoria}</span>
                 </div>
                 <p>Especialización en el cuidado de pacientes con enfermedad renal crónica y aguda, con enfoque cardiovascular.</p>
+                <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
             </div>
             """, unsafe_allow_html=True)
             if st.button("Inscribirme", key="insc_esp_nefrologica"):
@@ -519,15 +695,20 @@ def mostrar_oferta_educativa():
                 st.rerun()
 
         with col3:
-            st.markdown("""
+            abreviatura = ABREVIATURAS_PROGRAMAS["Especialidad en Gestión del Cuidado"]
+            categoria = obtener_categoria_directorio(abreviatura)
+            st.markdown(f"""
             <div class="programa-card">
                 <h3>Especialidad en Gestión del Cuidado</h3>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                     <span class="badge badge-primary">2 años</span>
                     <span class="badge badge-secondary">Semipresencial</span>
                     <span class="badge badge-warning">Próxima apertura Feb 2026</span>
+                    <span class="badge badge-info">{abreviatura}</span>
+                    <span class="badge badge-warning">{categoria}</span>
                 </div>
                 <p>Formación en gestión y administración de servicios de enfermería con enfoque en calidad del cuidado.</p>
+                <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
             </div>
             """, unsafe_allow_html=True)
             if st.button("Pre-inscripción", key="insc_esp_gestion"):
@@ -539,19 +720,24 @@ def mostrar_oferta_educativa():
         st.markdown("""
         <div style="background-color: #e8f4fd; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
             <h4>🔵 Especialidad con Aval de la SEP</h4>
-            <p>Programa de posgrado con reconocimiento oficial federal</p>
+            <p>Programa de posgrado con reconocimiento oficial federal → <strong>Directorio remoto: ESPECIALIDADES/</strong></p>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("""
+        abreviatura = ABREVIATURAS_PROGRAMAS["Especialidad de Enfermería en Circulación Extracorpórea y Perfusión"]
+        categoria = obtener_categoria_directorio(abreviatura)
+        st.markdown(f"""
         <div class="programa-card">
             <h3>Especialidad de Enfermería en Circulación Extracorpórea y Perfusión</h3>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                 <span class="badge badge-primary">2 años</span>
                 <span class="badge badge-secondary">Presencial</span>
                 <span class="badge badge-success">Aval SEP</span>
+                <span class="badge badge-info">{abreviatura}</span>
+                <span class="badge badge-warning">{categoria}</span>
             </div>
             <p>Especialización única en el manejo de equipos de circulación extracorpórea durante procedimientos cardiovasculares complejos.</p>
+            <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Inscribirme", key="insc_esp_perfusion"):
@@ -563,19 +749,24 @@ def mostrar_oferta_educativa():
         st.markdown("""
         <div style="background-color: #e8f5e8; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
             <h4>🟢 Pregrado con Aval de la UNAM</h4>
-            <p>Formación de nivel licenciatura con reconocimiento universitario</p>
+            <p>Formación de nivel licenciatura con reconocimiento universitario → <strong>Directorio remoto: LICENCIATURAS/</strong></p>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("""
+        abreviatura = ABREVIATURAS_PROGRAMAS["Licenciatura en Enfermería"]
+        categoria = obtener_categoria_directorio(abreviatura)
+        st.markdown(f"""
         <div class="programa-card">
             <h3>Licenciatura en Enfermería</h3>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                 <span class="badge badge-primary">4 años</span>
                 <span class="badge badge-secondary">Presencial</span>
                 <span class="badge badge-success">Aval UNAM</span>
+                <span class="badge badge-info">{abreviatura}</span>
+                <span class="badge badge-warning">{categoria}</span>
             </div>
             <p>Formación integral de enfermeros generales con competencias para el cuidado de la salud cardiovascular en diferentes contextos.</p>
+            <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Inscribirme", key="insc_lic_enfermeria"):
@@ -587,7 +778,7 @@ def mostrar_oferta_educativa():
         st.markdown("""
         <div style="background-color: #fff3cd; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
             <h4>📚 Educación Continua</h4>
-            <p>Diplomados de actualización para profesionales de enfermería</p>
+            <p>Diplomados de actualización para profesionales de enfermería → <strong>Directorio remoto: DIPLOMADOS/</strong></p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -599,29 +790,34 @@ def mostrar_oferta_educativa():
                     "nombre": "Diplomado de Cardiología Básica para Profesionales de Enfermería",
                     "duracion": "6 meses",
                     "modalidad": "Semipresencial",
-                    "desc": "Actualización en fundamentos de cardiología para enfermería general."
+                    "desc": "Actualización en fundamentos de cardiología para enfermería general.",
+                    "abreviatura": ABREVIATURAS_PROGRAMAS["Diplomado de Cardiología Básica para Profesionales de Enfermería"]
                 },
                 {
                     "nombre": "Diplomado de Cardiología Pediátrica para Profesionales de Enfermería",
                     "duracion": "6 meses",
                     "modalidad": "Semipresencial",
-                    "desc": "Especialización en cuidado cardiovascular para pacientes pediátricos."
+                    "desc": "Especialización en cuidado cardiovascular para pacientes pediátricos.",
+                    "abreviatura": ABREVIATURAS_PROGRAMAS["Diplomado de Cardiología Pediátrica para Profesionales de Enfermería"]
                 },
                 {
                     "nombre": "Diplomado de Oxigenación por Membrana Extracorpórea",
                     "duracion": "6 meses",
                     "modalidad": "Presencial",
-                    "desc": "Capacitación en manejo de ECMO para pacientes críticos."
+                    "desc": "Capacitación en manejo de ECMO para pacientes críticos.",
+                    "abreviatura": ABREVIATURAS_PROGRAMAS["Diplomado de Oxigenación por Membrana Extracorpórea"]
                 },
                 {
                     "nombre": "Diplomado de Enseñanza en Simulación Clínica",
                     "duracion": "6 meses",
                     "modalidad": "Semipresencial",
-                    "desc": "Formación en metodologías de simulación para educación en enfermería."
+                    "desc": "Formación en metodologías de simulación para educación en enfermería.",
+                    "abreviatura": ABREVIATURAS_PROGRAMAS["Diplomado de Enseñanza en Simulación Clínica"]
                 }
             ]
 
             for i, diplomado in enumerate(diplomados_col1):
+                categoria = obtener_categoria_directorio(diplomado['abreviatura'])
                 st.markdown(f"""
                 <div class="programa-card">
                     <h3>{diplomado['nombre']}</h3>
@@ -629,8 +825,11 @@ def mostrar_oferta_educativa():
                         <span class="badge badge-primary">{diplomado['duracion']}</span>
                         <span class="badge badge-secondary">{diplomado['modalidad']}</span>
                         <span class="badge badge-success">Diplomado</span>
+                        <span class="badge badge-info">{diplomado['abreviatura']}</span>
+                        <span class="badge badge-warning">{categoria}</span>
                     </div>
                     <p>{diplomado['desc']}</p>
+                    <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button(f"Inscribirme {i+1}", key=f"insc_dipl{i}"):
@@ -644,17 +843,20 @@ def mostrar_oferta_educativa():
                     "nombre": "Diplomado de Hemodinámica",
                     "duracion": "6 meses",
                     "modalidad": "Presencial",
-                    "desc": "Especialización en procedimientos de hemodinámica y cardiología intervencionista."
+                    "desc": "Especialización en procedimientos de hemodinámica y cardiología intervencionista.",
+                    "abreviatura": ABREVIATURAS_PROGRAMAS["Diplomado de Hemodinámica"]
                 },
                 {
                     "nombre": "Diplomado de Nefro-Intervencionismo",
                     "duracion": "6 meses",
                     "modalidad": "Presencial",
-                    "desc": "Capacitación en procedimientos intervencionistas nefrológicos."
+                    "desc": "Capacitación en procedimientos intervencionistas nefrológicos.",
+                    "abreviatura": ABREVIATURAS_PROGRAMAS["Diplomado de Nefro-Intervencionismo"]
                 }
             ]
 
             for i, diplomado in enumerate(diplomados_col2):
+                categoria = obtener_categoria_directorio(diplomado['abreviatura'])
                 st.markdown(f"""
                 <div class="programa-card">
                     <h3>{diplomado['nombre']}</h3>
@@ -662,8 +864,11 @@ def mostrar_oferta_educativa():
                         <span class="badge badge-primary">{diplomado['duracion']}</span>
                         <span class="badge badge-secondary">{diplomado['modalidad']}</span>
                         <span class="badge badge-success">Diplomado</span>
+                        <span class="badge badge-info">{diplomado['abreviatura']}</span>
+                        <span class="badge badge-warning">{categoria}</span>
                     </div>
                     <p>{diplomado['desc']}</p>
+                    <p><small>📁 Directorio remoto: <strong>{categoria}/</strong></small></p>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button(f"Inscribirme {i+5}", key=f"insc_dipl{i+4}"):
@@ -679,6 +884,7 @@ def mostrar_inscripcion():
     </div>
     """, unsafe_allow_html=True)
 
+    # Inicializar datos_inscripcion si no existe
     if 'datos_inscripcion' not in st.session_state:
         st.session_state.datos_inscripcion = {
             'matricula': generar_matricula(),
@@ -692,78 +898,107 @@ def mostrar_inscripcion():
             'completado': False
         }
 
+    # Si hay un programa seleccionado pero no está en los datos actuales, actualizarlo
+    if (st.session_state.get('programa_seleccionado') and
+        st.session_state.programa_seleccionado != st.session_state.datos_inscripcion['programa']):
+        st.session_state.datos_inscripcion['programa'] = st.session_state.programa_seleccionado
+
     with st.form("form_inscripcion"):
+        # Verificar que matricula existe antes de mostrarla
+        matricula = st.session_state.datos_inscripcion.get('matricula', generar_matricula())
+        programa_actual = st.session_state.datos_inscripcion.get('programa', '')
+        abreviatura_programa = obtener_abreviatura_programa(programa_actual) if programa_actual else "SELEC"
+        categoria_remota = obtener_categoria_directorio(abreviatura_programa)
+
+        config = obtener_configuracion()
+        remote_base = config.get('remote_dir', '')
+
         st.markdown(f"""
         <div style="background-color: #e9f7ff; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
-            <h4>Número de Matrícula: <strong>{st.session_state.datos_inscripcion['matricula']}</strong></h4>
+            <h4>Número de Matrícula: <strong>{matricula}</strong></h4>
+            <p><strong>Abreviatura del programa:</strong> {abreviatura_programa}</p>
+            <p><strong>Directorio remoto destino:</strong> {remote_base}/{categoria_remota}/</p>
             <p><small>Esta matrícula identificará tu expediente durante todo el proceso</small></p>
         </div>
         """, unsafe_allow_html=True)
 
-        programas = [
-            "Especialidad en Enfermería Cardiovascular",
-            "Especialidad en Enfermería Nefrológica",
-            "Especialidad en Gestión del Cuidado",
-            "Especialidad de Enfermería en Circulación Extracorpórea y Perfusión",
-            "Licenciatura en Enfermería",
-            "Diplomado de Cardiología Básica para Profesionales de Enfermería",
-            "Diplomado de Cardiología Pediátrica para Profesionales de Enfermería",
-            "Diplomado de Oxigenación por Membrana Extracorpórea",
-            "Diplomado de Enseñanza en Simulación Clínica",
-            "Diplomado de Hemodinámica",
-            "Diplomado de Nefro-Intervencionismo"
-        ]
+        programas = list(ABREVIATURAS_PROGRAMAS.keys())
 
-        st.session_state.datos_inscripcion['programa'] = st.selectbox(
+        # Obtener el programa actual o usar el seleccionado
+        programa_index = programas.index(programa_actual) if programa_actual in programas else 0
+
+        programa_seleccionado = st.selectbox(
             "Programa al que desea inscribirse:",
             programas,
-            index=programas.index(st.session_state.datos_inscripcion['programa']) if st.session_state.datos_inscripcion['programa'] in programas else 0
+            index=programa_index
         )
 
+        # Actualizar el programa en los datos de inscripción
+        st.session_state.datos_inscripcion['programa'] = programa_seleccionado
+        abreviatura_actual = obtener_abreviatura_programa(programa_seleccionado)
+        categoria_actual = obtener_categoria_directorio(abreviatura_actual)
+
         # Mostrar información de la carpeta destino
-        ruta_carpeta = obtener_ruta_carpeta(st.session_state.datos_inscripcion['programa'])
-        st.info(f"📁 **Carpeta destino:** `{ruta_carpeta}`")
+        ruta_carpeta = obtener_ruta_carpeta(programa_seleccionado)
+        st.info(f"📁 **Carpeta local:** `{ruta_carpeta}`")
+        st.info(f"🌐 **Directorio remoto:** `{remote_base}/{categoria_actual}/`")
+        st.info(f"🔤 **Abreviatura del programa:** `{abreviatura_actual}`")
 
         # Mostrar ejemplo de nombres de archivo
-        if st.session_state.datos_inscripcion['nombre_completo']:
-            nombre_base = generar_nombre_archivo_base(st.session_state.datos_inscripcion)
-            st.info(f"📄 **Ejemplo de nombres de archivos:** `{nombre_base}.acta_nacimiento.pdf`, `{nombre_base}.curp.pdf`")
+        nombre_completo = st.session_state.datos_inscripcion.get('nombre_completo', '')
+        if nombre_completo:
+            nombre_base_ejemplo = f"{matricula}.{abreviatura_actual}.25-09-25-18-12.{nombre_completo.replace(' ', '_')}"
+            st.info(f"📄 **Ejemplo de nombres de archivos:**")
+            st.code(f"{nombre_base_ejemplo}.ACTNAC.pdf")
+            st.code(f"→ Se guardará en: {remote_base}/{categoria_actual}/")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.session_state.datos_inscripcion['nombre_completo'] = st.text_input(
+            nombre_completo = st.text_input(
                 "Nombre completo:",
-                value=st.session_state.datos_inscripcion['nombre_completo']
+                value=st.session_state.datos_inscripcion.get('nombre_completo', '')
             )
+            st.session_state.datos_inscripcion['nombre_completo'] = nombre_completo
 
-            fecha_actual = st.session_state.datos_inscripcion['fecha_nacimiento'] if st.session_state.datos_inscripcion['fecha_nacimiento'] else datetime.date(1990, 1, 1)
-            st.session_state.datos_inscripcion['fecha_nacimiento'] = st.date_input(
+            fecha_nacimiento_actual = st.session_state.datos_inscripcion.get('fecha_nacimiento')
+            if not fecha_nacimiento_actual:
+                fecha_nacimiento_actual = datetime.date(1990, 1, 1)
+
+            fecha_nacimiento = st.date_input(
                 "Fecha de nacimiento:",
-                value=fecha_actual
+                value=fecha_nacimiento_actual
             )
+            st.session_state.datos_inscripcion['fecha_nacimiento'] = fecha_nacimiento
 
-            st.session_state.datos_inscripcion['genero'] = st.selectbox(
+            genero_actual = st.session_state.datos_inscripcion.get('genero', 'Masculino')
+            genero_opciones = ["Masculino", "Femenino", "Otro", "Prefiero no decir"]
+            genero_index = genero_opciones.index(genero_actual) if genero_actual in genero_opciones else 0
+
+            genero = st.selectbox(
                 "Género:",
-                ["Masculino", "Femenino", "Otro", "Prefiero no decir"],
-                index=["Masculino", "Femenino", "Otro", "Prefiero no decir"].index(st.session_state.datos_inscripcion['genero']) if st.session_state.datos_inscripcion['genero'] in ["Masculino", "Femenino", "Otro", "Prefiero no decir"] else 0
+                genero_opciones,
+                index=genero_index
             )
+            st.session_state.datos_inscripcion['genero'] = genero
 
         with col2:
-            st.session_state.datos_inscripcion['email'] = st.text_input(
+            email = st.text_input(
                 "Correo electrónico:",
-                value=st.session_state.datos_inscripcion['email']
+                value=st.session_state.datos_inscripcion.get('email', '')
             )
+            st.session_state.datos_inscripcion['email'] = email
 
-            st.session_state.datos_inscripcion['telefono'] = st.text_input(
+            telefono = st.text_input(
                 "Teléfono:",
-                value=st.session_state.datos_inscripcion['telefono']
+                value=st.session_state.datos_inscripcion.get('telefono', '')
             )
+            st.session_state.datos_inscripcion['telefono'] = telefono
 
         st.markdown("""
         <div style="margin: 2rem 0 1rem 0;">
             <h4>Documentos Requeridos</h4>
-            <p>Sube los siguientes documentos en formato PDF. Los archivos se guardarán con nombres estandarizados.</p>
+            <p>Sube los siguientes documentos en formato PDF. Los archivos se guardarán con nombres estandarizados usando abreviaturas.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -787,12 +1022,24 @@ def mostrar_inscripcion():
             ]
         }
 
-        if "Licenciatura" in st.session_state.datos_inscripcion['programa']:
+        if "Licenciatura" in programa_seleccionado:
             documentos = documentos_requeridos["Licenciatura"]
-        elif "Especialidad" in st.session_state.datos_inscripcion['programa']:
+        elif "Especialidad" in programa_seleccionado:
             documentos = documentos_requeridos["Especialidad"]
         else:
             documentos = documentos_requeridos["Diplomado"]
+
+        # Mostrar abreviaturas de documentos
+        st.info("📋 **Abreviaturas de documentos que se usarán:**")
+        col_docs1, col_docs2 = st.columns(2)
+        with col_docs1:
+            for i, doc in enumerate(documentos[:len(documentos)//2]):
+                abrev = obtener_abreviatura_documento(doc)
+                st.write(f"• **{abrev}**: {doc}")
+        with col_docs2:
+            for i, doc in enumerate(documentos[len(documentos)//2:]):
+                abrev = obtener_abreviatura_documento(doc)
+                st.write(f"• **{abrev}**: {doc}")
 
         archivos_subidos = []
         for i, doc in enumerate(documentos):
@@ -820,12 +1067,12 @@ def mostrar_inscripcion():
         if guardar or enviar:
             errores = []
 
-            if not st.session_state.datos_inscripcion['nombre_completo']:
+            if not nombre_completo:
                 errores.append("El nombre completo es obligatorio")
 
-            if not st.session_state.datos_inscripcion['email']:
+            if not email:
                 errores.append("El correo electrónico es obligatorio")
-            elif not validar_email(st.session_state.datos_inscripcion['email']):
+            elif not validar_email(email):
                 errores.append("Ingrese un correo electrónico válido")
 
             if enviar and len(archivos_subidos) < len(documentos):
@@ -836,6 +1083,9 @@ def mostrar_inscripcion():
                     st.error(error)
             else:
                 st.session_state.datos_inscripcion['fecha_inscripcion'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Asegurarnos de que la matrícula esté actualizada
+                st.session_state.datos_inscripcion['matricula'] = matricula
 
                 # Usar la nueva función de guardado completo
                 exito, resultado = guardar_progreso_completo(
@@ -849,10 +1099,18 @@ def mostrar_inscripcion():
                         st.success("✅ Progreso guardado correctamente")
                         if resultado['documentos_guardados']:
                             st.info(f"📄 Documentos guardados: {len(resultado['documentos_guardados'])} archivos")
+                            with st.expander("Ver detalles de archivos guardados"):
+                                for doc in resultado['documentos_guardados']:
+                                    st.write(f"• **{doc['abreviatura']}**: `{os.path.basename(doc['nombre_guardado'])}`")
 
                     if enviar:
                         st.success("🎉 ¡Inscripción enviada con éxito!")
                         st.balloons()
+
+                        # Mostrar información de destino remoto
+                        abrev_final = obtener_abreviatura_programa(st.session_state.datos_inscripcion['programa'])
+                        categoria_final = obtener_categoria_directorio(abrev_final)
+                        st.success(f"📁 **Archivos transferidos a:** `{remote_base}/{categoria_final}/`")
 
                         # Mostrar resumen y opción de descarga
                         mostrar_resumen_inscripcion(st.session_state.datos_inscripcion, resultado)
@@ -861,24 +1119,33 @@ def mostrar_inscripcion():
 
 def mostrar_resumen_inscripcion(datos_inscripcion, resultado):
     """Muestra el resumen de la inscripción completada"""
-    st.markdown("### Resumen de tu inscripción")
+    st.markdown("### 📋 Resumen de tu inscripción")
+
+    abreviatura_programa = obtener_abreviatura_programa(datos_inscripcion['programa'])
+    categoria_remota = obtener_categoria_directorio(abreviatura_programa)
+    config = obtener_configuracion()
+    remote_base = config.get('remote_dir', '')
 
     col_res1, col_res2 = st.columns(2)
 
     with col_res1:
         st.write("**Información personal:**")
-        st.write(f"• Matrícula: {datos_inscripcion['matricula']}")
-        st.write(f"• Programa: {datos_inscripcion['programa']}")
-        st.write(f"• Nombre: {datos_inscripcion['nombre_completo']}")
-        st.write(f"• Email: {datos_inscripcion['email']}")
-        st.write(f"• Fecha: {datos_inscripcion['fecha_inscripcion']}")
+        st.write(f"• **Matrícula:** {datos_inscripcion['matricula']}")
+        st.write(f"• **Programa:** {datos_inscripcion['programa']}")
+        st.write(f"• **Abreviatura:** {abreviatura_programa}")
+        st.write(f"• **Categoría remota:** {categoria_remota}")
+        st.write(f"• **Nombre:** {datos_inscripcion['nombre_completo']}")
+        st.write(f"• **Email:** {datos_inscripcion['email']}")
+        st.write(f"• **Fecha:** {datos_inscripcion['fecha_inscripcion']}")
 
     with col_res2:
         st.write("**Archivos guardados:**")
-        st.write(f"• Registro: `{os.path.basename(resultado['ruta_csv'])}`")
+        st.write(f"• **Directorio remoto:** `{remote_base}/{categoria_remota}/`")
+        st.write(f"• **Registro:** `{os.path.basename(resultado['ruta_csv'])}`")
         if resultado['documentos_guardados']:
+            st.write("**Documentos transferidos:**")
             for doc in resultado['documentos_guardados']:
-                st.write(f"• {os.path.basename(doc['nombre_guardado'])}")
+                st.write(f"• **{doc['abreviatura']}:** `{os.path.basename(doc['nombre_guardado'])}`")
 
     # Comprobante para descarga
     comprobante = f"""
@@ -888,6 +1155,9 @@ def mostrar_resumen_inscripcion(datos_inscripcion, resultado):
 
     Matrícula: {datos_inscripcion['matricula']}
     Programa: {datos_inscripcion['programa']}
+    Abreviatura: {abreviatura_programa}
+    Categoría remota: {categoria_remota}
+    Directorio destino: {remote_base}/{categoria_remota}/
     Nombre: {datos_inscripcion['nombre_completo']}
     Email: {datos_inscripcion['email']}
     Fecha de inscripción: {datos_inscripcion['fecha_inscripcion']}
@@ -895,6 +1165,11 @@ def mostrar_resumen_inscripcion(datos_inscripcion, resultado):
 
     Archivos guardados en: {resultado['ruta_csv']}
     Documentos subidos: {len(resultado['documentos_guardados'])} archivos
+    Directorio remoto: {remote_base}/{categoria_remota}/
+
+    ABREVIATURAS UTILIZADAS:
+    Programa: {abreviatura_programa} → {categoria_remota}
+    Documentos: {', '.join([doc['abreviatura'] for doc in resultado['documentos_guardados']])}
     """
 
     st.download_button(
@@ -912,7 +1187,7 @@ def mostrar_documentacion():
     </div>
     """, unsafe_allow_html=True)
 
-    if 'datos_inscripcion' not in st.session_state or not st.session_state.datos_inscripcion['programa']:
+    if 'datos_inscripcion' not in st.session_state or not st.session_state.datos_inscripcion.get('programa'):
         st.warning("Por favor completa primero tus datos personales en la sección de Inscripción")
         return
 
@@ -953,6 +1228,10 @@ def mostrar_documentacion():
     }
 
     programa_actual = st.session_state.datos_inscripcion['programa']
+    abreviatura_programa = obtener_abreviatura_programa(programa_actual)
+    categoria_remota = obtener_categoria_directorio(abreviatura_programa)
+    config = obtener_configuracion()
+    remote_base = config.get('remote_dir', '')
 
     # Documentos por defecto si el programa no está en la lista
     documentos = programas_docs.get(programa_actual, [
@@ -966,11 +1245,14 @@ def mostrar_documentacion():
     st.markdown(f"""
     <div style="background-color: #f8f9fa; padding: 1.5rem; border-radius: 10px;">
         <h4>Documentos requeridos para: <strong>{programa_actual}</strong></h4>
+        <p><strong>Abreviatura del programa:</strong> {abreviatura_programa}</p>
+        <p><strong>Directorio remoto destino:</strong> {remote_base}/{categoria_remota}/</p>
         <ul style="margin-top: 1rem;">
     """, unsafe_allow_html=True)
 
     for doc in documentos:
-        st.markdown(f"<li>{doc}</li>", unsafe_allow_html=True)
+        abreviatura = obtener_abreviatura_documento(doc)
+        st.markdown(f"<li><strong>{abreviatura}:</strong> {doc}</li>", unsafe_allow_html=True)
 
     st.markdown("""
         </ul>
@@ -981,10 +1263,11 @@ def mostrar_documentacion():
     <div style="margin-top: 2rem;">
         <h4>Información sobre nombres de archivos</h4>
         <p>Los documentos se guardarán automáticamente con nombres estandarizados en el formato:</p>
-        <p><code>[MATRÍCULA].[FECHA].[NOMBRE].[TIPO_DOCUMENTO].pdf</code></p>
-        <p><strong>Ejemplo:</strong> <code>MAT-ABC12345.25-01-15-14-30.Juan_Perez.acta_nacimiento.pdf</code></p>
+        <p><code>[MATRÍCULA].[ABREV-PROGRAMA].[FECHA].[NOMBRE].[ABREV-DOCUMENTO].pdf</code></p>
+        <p><strong>Ejemplo:</strong> <code>MAT-ABC12345.ESP-CARD.25-09-25-18-12.Carlos_Polanco.CEDULA.pdf</code></p>
+        <p><strong>Destino remoto:</strong> <code>{remote_base}/{categoria_remota}/MAT-ABC12345.ESP-CARD.25-09-25-18-12.Carlos_Polanco.CEDULA.pdf</code></p>
     </div>
-    """, unsafe_allow_html=True)
+    """.format(remote_base=remote_base, categoria_remota=categoria_remota), unsafe_allow_html=True)
 
 def mostrar_pagos():
     st.markdown("""
@@ -994,7 +1277,7 @@ def mostrar_pagos():
     </div>
     """, unsafe_allow_html=True)
 
-    if 'datos_inscripcion' not in st.session_state or not st.session_state.datos_inscripcion['programa']:
+    if 'datos_inscripcion' not in st.session_state or not st.session_state.datos_inscripcion.get('programa'):
         st.warning("Por favor completa primero tus datos personales en la sección de Inscripción")
         return
 
@@ -1032,6 +1315,11 @@ def mostrar_pagos():
     }
 
     programa_actual = st.session_state.datos_inscripcion['programa']
+    abreviatura_programa = obtener_abreviatura_programa(programa_actual)
+    categoria_remota = obtener_categoria_directorio(abreviatura_programa)
+    config = obtener_configuracion()
+    remote_base = config.get('remote_dir', '')
+
     costos = programas_costos.get(programa_actual, {
         "Inscripción": "$2,500 MXN",
         "Mensualidad": "$4,000 MXN",
@@ -1042,6 +1330,8 @@ def mostrar_pagos():
     st.markdown(f"""
     <div style="background-color: #f8f9fa; padding: 1.5rem; border-radius: 10px;">
         <h4>Costos para: <strong>{programa_actual}</strong></h4>
+        <p><strong>Abreviatura:</strong> {abreviatura_programa}</p>
+        <p><strong>Directorio remoto:</strong> {remote_base}/{categoria_remota}/</p>
         <div style="margin-top: 1rem;">
     """, unsafe_allow_html=True)
 
@@ -1189,7 +1479,20 @@ def main():
         st.session_state.programa_seleccionado = ""
 
     if 'datos_inscripcion' not in st.session_state:
-        st.session_state.datos_inscripcion = {}
+        st.session_state.datos_inscripcion = {
+            'matricula': generar_matricula(),
+            'programa': st.session_state.get('programa_seleccionado', ''),
+            'nombre_completo': '',
+            'fecha_nacimiento': None,
+            'genero': '',
+            'email': '',
+            'telefono': '',
+            'documentos': [],
+            'completado': False
+        }
+
+    if 'mostrar_abreviaturas' not in st.session_state:
+        st.session_state.mostrar_abreviaturas = False
 
     mostrar_header()
     mostrar_sidebar()
@@ -1213,7 +1516,10 @@ def main():
         st.sidebar.markdown("### 🔍 Modo Debug")
         st.sidebar.write(f"Sección actual: {st.session_state.seccion_actual}")
         st.sidebar.write(f"Programa seleccionado: {st.session_state.programa_seleccionado}")
+        st.sidebar.write(f"Matrícula: {st.session_state.datos_inscripcion.get('matricula', 'No definida')}")
         st.sidebar.write(f"Modo supervisor: {config.get('supervisor_mode', False)}")
+        st.sidebar.write(f"Remote dir: {config.get('remote_dir', 'No definido')}")
 
 if __name__ == "__main__":
     main()
+
