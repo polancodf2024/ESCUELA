@@ -625,7 +625,7 @@ def mostrar_formulario_inscripcion():
                 )
             
             with col2:
-                telefono = st.text_input("📞 Teléfono *", placeholder="55-1234-5678")
+                telefono = st.text_input("📞 Teléfono *", placeholder="5512345678")
                 
                 # FECHA DE NACIMIENTO CON RANGO DESDE 1980
                 fecha_actual = date.today()
