@@ -1733,17 +1733,20 @@ def mostrar_dashboard_administrador():
 def mostrar_gestion_usuarios():
     """Gestión de usuarios para administradores"""
     st.subheader("👥 Gestión de Usuarios")
-    
+
+    # Declarar que vamos a usar la variable global
+    global df_usuarios
+
     if df_usuarios.empty:
         st.error("❌ No se pudo cargar la base de datos de usuarios")
         return
-    
+
     # Mostrar tabla de usuarios
     st.dataframe(df_usuarios, use_container_width=True)
-    
+
     # Opciones de gestión
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("Agregar Usuario")
         with st.form("agregar_usuario"):
@@ -1751,7 +1754,7 @@ def mostrar_gestion_usuarios():
             nueva_contraseña = st.text_input("Contraseña", type="password")
             nuevo_rol = st.selectbox("Rol", ["inscrito", "estudiante", "egresado", "contratado", "administrador"])
             nuevo_email = st.text_input("Email")
-            
+
             if st.form_submit_button("➕ Agregar Usuario"):
                 # Validar que no exista el usuario
                 if nuevo_usuario in df_usuarios['usuario'].values:
@@ -1765,23 +1768,31 @@ def mostrar_gestion_usuarios():
                         'fecha_creacion': datetime.now().strftime('%Y-%m-%d'),
                         'estado': 'activo'
                     }
-                    
-                    df_usuarios.loc[len(df_usuarios)] = nuevo_registro
-                    
-                    if editor.guardar_dataframe_remoto(df_usuarios, editor.obtener_ruta_archivo('usuarios')):
+
+                    # Crear una copia para evitar problemas de referencia
+                    df_temp = df_usuarios.copy()
+                    df_temp = pd.concat([df_temp, pd.DataFrame([nuevo_registro])], ignore_index=True)
+
+                    if editor.guardar_dataframe_remoto(df_temp, editor.obtener_ruta_archivo('usuarios')):
+                        # Actualizar la variable global
+                        df_usuarios = df_temp
                         st.success("✅ Usuario agregado exitosamente")
                         st.rerun()
-    
+
     with col2:
         st.subheader("Eliminar Usuario")
         usuario_eliminar = st.selectbox("Seleccionar usuario a eliminar", df_usuarios['usuario'].values)
-        
+
         if st.button("🗑️ Eliminar Usuario", type="secondary"):
             if usuario_eliminar == st.session_state.usuario_actual['usuario']:
                 st.error("❌ No puedes eliminar tu propio usuario")
             else:
-                df_usuarios = df_usuarios[df_usuarios['usuario'] != usuario_eliminar]
-                if editor.guardar_dataframe_remoto(df_usuarios, editor.obtener_ruta_archivo('usuarios')):
+                # Crear una copia para evitar problemas de referencia
+                df_temp = df_usuarios[df_usuarios['usuario'] != usuario_eliminar].copy()
+
+                if editor.guardar_dataframe_remoto(df_temp, editor.obtener_ruta_archivo('usuarios')):
+                    # Actualizar la variable global
+                    df_usuarios = df_temp
                     st.success("✅ Usuario eliminado exitosamente")
                     st.rerun()
 
