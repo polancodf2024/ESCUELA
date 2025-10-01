@@ -10,6 +10,9 @@ import random
 import string
 from PIL import Image
 import paramiko
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -113,6 +116,112 @@ class CargadorRemoto:
             self.desconectar()
 
 # =============================================================================
+# SISTEMA DE ENVÍO DE CORREOS ELECTRÓNICOS - CORREGIDO CON TUS CREDENCIALES
+# =============================================================================
+
+class SistemaCorreos:
+    def __init__(self):
+        try:
+            # Usar las claves correctas de tu secrets.toml
+            self.smtp_server = st.secrets["smtp_server"]
+            self.smtp_port = st.secrets["smtp_port"]
+            self.smtp_username = st.secrets["email_user"]  # Corregido: email_user en lugar de smtp_username
+            self.smtp_password = st.secrets["email_password"]
+            self.email_from = st.secrets["email_user"]  # Usar el mismo email como remitente
+            self.correos_habilitados = True
+        except Exception as e:
+            st.warning(f"⚠️ Configuración de correo no disponible: {e}")
+            self.correos_habilitados = False
+    
+    def enviar_correo_confirmacion(self, destinatario, nombre_estudiante, matricula, folio, programa):
+        """Enviar correo de confirmación de pre-inscripción"""
+        if not self.correos_habilitados:
+            st.warning("⚠️ Sistema de correos no configurado. No se enviará correo de confirmación.")
+            return False
+            
+        try:
+            # Crear mensaje
+            mensaje = MIMEMultipart()
+            mensaje['From'] = self.email_from
+            mensaje['To'] = destinatario
+            mensaje['Subject'] = f"Confirmación de Pre-Inscripción - {matricula}"
+            
+            # Cuerpo del correo
+            cuerpo = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                    <div style="text-align: center; background-color: #2E86AB; color: white; padding: 20px; border-radius: 10px 10px 0 0;">
+                        <h1>🏥 Escuela de Enfermería</h1>
+                        <h2>Confirmación de Pre-Inscripción</h2>
+                    </div>
+                    
+                    <div style="padding: 20px;">
+                        <p>Estimado/a <strong>{nombre_estudiante}</strong>,</p>
+                        
+                        <p>Hemos recibido exitosamente tu solicitud de pre-inscripción. A continuación encontrarás los detalles de tu registro:</p>
+                        
+                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                            <h3 style="color: #2E86AB; margin-top: 0;">📋 Datos de tu Registro</h3>
+                            <p><strong>Matrícula:</strong> {matricula}</p>
+                            <p><strong>Folio:</strong> {folio}</p>
+                            <p><strong>Programa:</strong> {programa}</p>
+                            <p><strong>Fecha de registro:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                            <p><strong>Estatus:</strong> Pre-inscrito</p>
+                        </div>
+                        
+                        <h3 style="color: #2E86AB;">📬 Próximos Pasos</h3>
+                        <ol>
+                            <li><strong>Revisión de documentos</strong> (2-3 días hábiles)</li>
+                            <li><strong>Correo de confirmación</strong> con fecha de examen</li>
+                            <li><strong>Examen de admisión</strong> (presencial/online)</li>
+                            <li><strong>Entrevista personal</strong> (si aplica)</li>
+                            <li><strong>Resultados finales</strong> (5-7 días después del examen)</li>
+                        </ol>
+                        
+                        <div style="background-color: #e8f4f8; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                            <h4 style="color: #A23B72; margin-top: 0;">ℹ️ Información Importante</h4>
+                            <p>Guarda esta información, ya que tu matrícula y folio serán necesarios para cualquier consulta sobre tu proceso de admisión.</p>
+                        </div>
+                        
+                        <p>Si tienes alguna pregunta, no dudes en contactarnos:</p>
+                        <ul>
+                            <li>📧 Email: admisiones@escuelaenfermeria.edu.mx</li>
+                            <li>📞 Teléfono: (55) 1234-5678</li>
+                            <li>🕒 Horario: Lunes a Viernes de 9:00 a 18:00 hrs</li>
+                        </ul>
+                        
+                        <p>¡Te deseamos mucho éxito en tu proceso de admisión!</p>
+                        
+                        <p>Atentamente,<br>
+                        <strong>Departamento de Admisiones</strong><br>
+                        Escuela de Enfermería<br>
+                        Formando Líderes en Salud Cardiovascular</p>
+                    </div>
+                    
+                    <div style="text-align: center; background-color: #f1f1f1; padding: 15px; border-radius: 0 0 10px 10px; font-size: 12px; color: #666;">
+                        <p>Este es un correo automático, por favor no respondas a este mensaje.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            mensaje.attach(MIMEText(cuerpo, 'html'))
+            
+            # Enviar correo
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_username, self.smtp_password)
+                server.send_message(mensaje)
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Error al enviar correo de confirmación: {e}")
+            return False
+
+# =============================================================================
 # SISTEMA DE GESTIÓN DE INSCRITOS CON CONEXIÓN REMOTA - RUTAS CORREGIDAS
 # =============================================================================
 
@@ -124,13 +233,15 @@ class SistemaInscritos:
         # Archivos CSV en las rutas correctas
         self.archivo_inscritos = os.path.join(self.BASE_DIR_REMOTO, "datos", "inscritos.csv")
         self.archivo_usuarios = os.path.join(self.BASE_DIR_REMOTO, "config", "usuarios.csv")
-        self.archivo_documentos = os.path.join(self.BASE_DIR_REMOTO, "datos", "documentos_inscritos.csv")
         
         # Carpeta para documentos PDF
         self.carpeta_documentos = os.path.join(self.BASE_DIR_REMOTO, "uploads")
         
         # Instancia del cargador remoto
         self.cargador_remoto = CargadorRemoto()
+        
+        # Instancia del sistema de correos
+        self.sistema_correos = SistemaCorreos()
         
         # Cargar datos iniciales
         self.cargar_datos()
@@ -154,14 +265,6 @@ class SistemaInscritos:
                     'usuario', 'password', 'rol', 'nombre', 'email', 
                     'activo', 'fecha_registro', 'estatus'
                 ])
-            
-            # Cargar documentos - desde datos/documentos_inscritos.csv
-            self.df_documentos = self.cargador_remoto.cargar_csv_remoto(self.archivo_documentos)
-            if self.df_documentos.empty:
-                self.df_documentos = pd.DataFrame(columns=[
-                    'matricula', 'nombre_archivo', 'tipo_documento', 
-                    'fecha_subida', 'estatus', 'ruta_archivo'
-                ])
                 
         except Exception as e:
             st.error(f"❌ Error cargando datos iniciales: {e}")
@@ -174,10 +277,6 @@ class SistemaInscritos:
             self.df_usuarios = pd.DataFrame(columns=[
                 'usuario', 'password', 'rol', 'nombre', 'email', 
                 'activo', 'fecha_registro', 'estatus'
-            ])
-            self.df_documentos = pd.DataFrame(columns=[
-                'matricula', 'nombre_archivo', 'tipo_documento', 
-                'fecha_subida', 'estatus', 'ruta_archivo'
             ])
     
     def guardar_datos(self):
@@ -193,10 +292,6 @@ class SistemaInscritos:
             
             # Guardar usuarios en config/usuarios.csv
             if not self.guardar_dataframe_remoto(self.df_usuarios, self.archivo_usuarios):
-                return False
-            
-            # Guardar documentos en datos/documentos_inscritos.csv
-            if not self.guardar_dataframe_remoto(self.df_documentos, self.archivo_documentos):
                 return False
             
             return True
@@ -294,15 +389,12 @@ class SistemaInscritos:
         except Exception as e:
             return f"MAT-INS{random.randint(10000, 99999)}"
     
-    def registrar_inscrito(self, datos_inscrito, nombres_documentos):
-        """Registrar nuevo inscrito en el sistema remoto"""
+    def registrar_inscrito(self, matricula, datos_inscrito, nombres_documentos):
+        """Registrar nuevo inscrito en el sistema remoto - CORREGIDO: usa la matrícula proporcionada"""
         try:
-            # Generar matrícula única
-            matricula = self.generar_matricula_inscrito()
-            
             # Crear registro del inscrito CON TODOS LOS CAMPOS CORRECTOS
             nuevo_inscrito = {
-                'matricula': matricula,
+                'matricula': matricula,  # USAR LA MATRÍCULA PROPORCIONADA
                 'fecha_registro': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'nombre_completo': datos_inscrito['nombre_completo'],
                 'email': datos_inscrito['email'],
@@ -334,7 +426,6 @@ class SistemaInscritos:
                 self.df_inscritos = pd.concat([self.df_inscritos, nuevo_df], ignore_index=True)
             
             # También crear registro en usuarios.csv CON EL FORMATO CORRECTO
-            # Basado en la estructura que muestras, el campo 'activo' va antes de 'fecha_registro'
             nuevo_usuario = {
                 'usuario': matricula,  # Usar la matrícula como usuario
                 'password': '123',     # Password como entero 123, no 123.0
@@ -354,6 +445,20 @@ class SistemaInscritos:
             
             # Guardar datos en servidor remoto
             if self.guardar_datos():
+                # ENVIAR CORREO DE CONFIRMACIÓN
+                correo_enviado = self.sistema_correos.enviar_correo_confirmacion(
+                    destinatario=datos_inscrito['email'],
+                    nombre_estudiante=datos_inscrito['nombre_completo'],
+                    matricula=matricula,
+                    folio=nuevo_inscrito['folio'],
+                    programa=datos_inscrito['programa_interes']
+                )
+                
+                if correo_enviado:
+                    st.success("📧 ¡Correo de confirmación enviado exitosamente!")
+                else:
+                    st.warning("⚠️ Registro completado, pero no se pudo enviar el correo de confirmación.")
+                
                 return matricula, nuevo_inscrito['folio']
             else:
                 return None, None
@@ -363,7 +468,7 @@ class SistemaInscritos:
             return None, None
     
     def guardar_documento(self, matricula, nombre_completo, tipo_documento, archivo):
-        """Guardar documento del inscrito en uploads/"""
+        """Guardar documento del inscrito en uploads/ - CORREGIDO: usa la MISMA matrícula"""
         try:
             # Generar nombre de archivo estandarizado
             timestamp = datetime.now().strftime('%y%m%d%H%M%S')
@@ -371,7 +476,7 @@ class SistemaInscritos:
             nombre_limpio = nombre_limpio.replace(' ', '_')[:30]
             tipo_limpio = tipo_documento.replace(' ', '_').upper()
             
-            # Nombre del archivo PDF
+            # Nombre del archivo PDF - USANDO LA MISMA MATRÍCULA
             extension = archivo.name.split('.')[-1] if '.' in archivo.name else 'pdf'
             nombre_archivo = f"{matricula}_{nombre_limpio}_{timestamp}_{tipo_limpio}.{extension}"
             
@@ -380,30 +485,13 @@ class SistemaInscritos:
             
             # Guardar archivo en servidor remoto
             if not self.guardar_archivo_remoto(archivo.getvalue(), ruta_completa):
-                return False
+                return None
             
-            # Registrar en base de datos de documentos
-            nuevo_documento = {
-                'matricula': matricula,
-                'nombre_archivo': nombre_archivo,
-                'tipo_documento': tipo_documento,
-                'fecha_subida': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'estatus': 'Pendiente de revisión',
-                'ruta_archivo': ruta_completa
-            }
-            
-            nuevo_doc_df = pd.DataFrame([nuevo_documento])
-            if self.df_documentos.empty:
-                self.df_documentos = nuevo_doc_df
-            else:
-                self.df_documentos = pd.concat([self.df_documentos, nuevo_doc_df], ignore_index=True)
-            
-            # Guardar registro en servidor remoto
-            return self.guardar_datos()
+            return nombre_archivo  # Devolver el nombre del archivo guardado
             
         except Exception as e:
             st.error(f"❌ Error al guardar documento: {e}")
-            return False
+            return None
 
 # Instancia del sistema de inscritos
 sistema_inscritos = SistemaInscritos()
@@ -649,7 +737,7 @@ def mostrar_formulario_inscripcion():
             
             # Documentos requeridos
             st.markdown("### 📎 Documentos Requeridos")
-            st.info("Por favor, sube los siguientes documentos en formato PDF:")
+            st.info("Por favor, suba los siguientes documentos en formato PDF:")
             
             col_doc1, col_doc2 = st.columns(2)
             
@@ -686,18 +774,21 @@ def mostrar_formulario_inscripcion():
                     st.error(f"❌ Faltan los siguientes documentos: {', '.join(docs_faltantes)}")
                     return
                 
-                # Registrar inscrito
+                # Registrar inscrito - CORREGIDO: Flujo simplificado con UNA matrícula
                 with st.spinner("Procesando tu solicitud..."):
+                    # PRIMERO: Generar la matrícula única UNA SOLA VEZ
+                    matricula_unica = sistema_inscritos.generar_matricula_inscrito()
+                    
                     datos_inscrito = {
                         'nombre_completo': nombre_completo,
                         'email': email,
                         'telefono': telefono,
                         'programa_interes': programa_interes,
                         'fecha_nacimiento': fecha_nacimiento,
-                        'como_se_entero': como_se_entero  # CORREGIDO: Guarda el texto, no el índice
+                        'como_se_entero': como_se_entero
                     }
                     
-                    # PRIMERO guardar los documentos para tener sus nombres
+                    # SEGUNDO: Guardar documentos con la MISMA matrícula
                     documentos_guardados = 0
                     nombres_documentos = []
                     documentos_info = [
@@ -707,49 +798,42 @@ def mostrar_formulario_inscripcion():
                         (foto, "FOTOGRAFIA") if foto else None
                     ]
                     
-                    # Generar matrícula temporal para guardar documentos
-                    matricula_temp = sistema_inscritos.generar_matricula_inscrito()
-                    
                     for doc_info in documentos_info:
                         if doc_info and doc_info[0] is not None:
                             try:
-                                if sistema_inscritos.guardar_documento(matricula_temp, nombre_completo, doc_info[1], doc_info[0]):
+                                nombre_archivo = sistema_inscritos.guardar_documento(
+                                    matricula_unica, nombre_completo, doc_info[1], doc_info[0]
+                                )
+                                if nombre_archivo:
                                     documentos_guardados += 1
-                                    # Obtener el nombre del archivo guardado
-                                    doc_guardado = sistema_inscritos.df_documentos[
-                                        sistema_inscritos.df_documentos['matricula'] == matricula_temp
-                                    ].iloc[-1]
-                                    nombres_documentos.append(doc_guardado['nombre_archivo'])
+                                    nombres_documentos.append(nombre_archivo)
                                     st.success(f"✅ {doc_info[1]} guardado correctamente")
                                 else:
                                     st.warning(f"⚠️ No se pudo guardar: {doc_info[1]}")
                             except Exception as e:
                                 st.warning(f"⚠️ Error con {doc_info[1]}: {e}")
                     
-                    # AHORA registrar el inscrito con los nombres de documentos
-                    matricula, folio = sistema_inscritos.registrar_inscrito(datos_inscrito, nombres_documentos)
-                    
-                    if matricula and folio:
-                        # Actualizar la matrícula en los documentos guardados
-                        if documentos_guardados > 0:
-                            sistema_inscritos.df_documentos.loc[
-                                sistema_inscritos.df_documentos['matricula'] == matricula_temp, 'matricula'
-                            ] = matricula
-                            sistema_inscritos.guardar_datos()
+                    # TERCERO: Registrar el inscrito con la MISMA matrícula y nombres de documentos
+                    if documentos_guardados >= 3:  # Al menos los 3 documentos obligatorios
+                        matricula_registrada, folio = sistema_inscritos.registrar_inscrito(
+                            matricula_unica, datos_inscrito, nombres_documentos  # Pasar la matrícula como parámetro
+                        )
                         
-                        st.session_state.formulario_enviado = True
-                        st.session_state.datos_exitosos = {
-                            'folio': folio,
-                            'matricula': matricula,
-                            'email': email,
-                            'telefono': telefono,
-                            'programa': programa_interes,
-                            'documentos': documentos_guardados
-                        }
-                        st.rerun()
-                    
+                        if matricula_registrada and folio:
+                            st.session_state.formulario_enviado = True
+                            st.session_state.datos_exitosos = {
+                                'folio': folio,
+                                'matricula': matricula_registrada,
+                                'email': email,
+                                'telefono': telefono,
+                                'programa': programa_interes,
+                                'documentos': documentos_guardados
+                            }
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al registrar el inscrito. Por favor intenta nuevamente.")
                     else:
-                        st.error("❌ Error al procesar la solicitud. Por favor intenta nuevamente.")
+                        st.error("❌ No se pudieron guardar los documentos obligatorios. Por favor intenta nuevamente.")
     
     else:
         # Mostrar resultados exitosos
@@ -780,12 +864,48 @@ def mostrar_formulario_inscripcion():
         *Te contactaremos al correo proporcionado para informarte los siguientes pasos.*
         """)
         
+        st.info("📧 **Se ha enviado un correo de confirmación a tu dirección de email con todos los detalles de tu registro.**")
+        
         col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
         with col_btn2:
             if st.button("📝 Realizar otra pre-inscripción", use_container_width=True):
                 st.session_state.formulario_enviado = False
                 st.session_state.mostrar_formulario = False
                 st.rerun()
+
+def mostrar_contacto():
+    """Mostrar información de contacto"""
+    st.markdown("---")
+    st.markdown('<div class="sub-header">📞 Información de Contacto</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("### 🏛️ Dirección")
+        st.markdown("""
+        Av. Insurgentes Sur 1234  
+        Col. Nápoles  
+        Ciudad de México, CDMX  
+        C.P. 03810
+        """)
+    
+    with col2:
+        st.markdown("### 📱 Contacto")
+        st.markdown("""
+        **Teléfono:** (55) 1234-5678  
+        **WhatsApp:** (55) 8765-4321  
+        **Email:** admisiones@escuelaenfermeria.edu.mx
+        """)
+    
+    with col3:
+        st.markdown("### 🕒 Horarios")
+        st.markdown("""
+        **Atención a aspirantes:**  
+        Lunes a Viernes: 9:00 - 18:00  
+        Sábados: 9:00 - 13:00  
+        **Proceso de admisión:**  
+        Abierto todo el año
+        """)
 
 def mostrar_footer():
     """Mostrar footer del website"""
@@ -832,32 +952,40 @@ def mostrar_footer():
     st.markdown("<center>© 2024 Instituto Nacional de Cardiología. Todos los derechos reservados.</center>", unsafe_allow_html=True)
 
 # =============================================================================
-# PÁGINA PRINCIPAL DEL WEBSITE
+# APLICACIÓN PRINCIPAL - WEBSITE PÚBLICO
 # =============================================================================
 
 def main():
+    """Función principal del website público"""
+    
     # Aplicar estilos
     aplicar_estilos_publicos()
     
-    # Inicializar estado de sesión
+    # Inicializar variables de sesión
     if 'mostrar_formulario' not in st.session_state:
         st.session_state.mostrar_formulario = False
-    if 'programa_seleccionado' not in st.session_state:
-        st.session_state.programa_seleccionado = None
-    if 'formulario_enviado' not in st.session_state:
-        st.session_state.formulario_enviado = False
     
-    # Mostrar secciones del website
+    # Mostrar header
     mostrar_header()
     
+    # Navegación
     if not st.session_state.mostrar_formulario:
+        # Página principal
         mostrar_hero()
         mostrar_programas_academicos()
         mostrar_testimonios()
+        mostrar_contacto()
     else:
+        # Formulario de inscripción
         mostrar_formulario_inscripcion()
+        mostrar_contacto()
     
+    # Mostrar footer
     mostrar_footer()
+
+# =============================================================================
+# EJECUCIÓN DE LA APLICACIÓN
+# =============================================================================
 
 if __name__ == "__main__":
     main()
